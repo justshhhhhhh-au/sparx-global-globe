@@ -55,64 +55,47 @@ function App() {
 		// We'll update this on every frame to make the globe spin
 		let phi = 0;
 
-		const globe = createGlobe(canvasRef.current as HTMLCanvasElement, {
-			devicePixelRatio: 2,
-			width: 400 * 2,
-			height: 400 * 2,
-			phi: 0,
-			theta: 0,
-			dark: 1,
-			diffuse: 0.8,
-			mapSamples: 16000,
-			mapBrightness: 6,
-			baseColor: [0.3, 0.3, 0.3],
-			markerColor: [0.8, 0.1, 0.1],
-			glowColor: [0.2, 0.2, 0.2],
-			markers: [],
-			opacity: 0.7,
-			onRender: (state) => {
-				// Called on every animation frame.
-				// `state` will be an empty object, return updated params.
-
-				// Get the current positions from our map
-				state.markers = [...positions.current.values()];
-
-				// Rotate the globe
-				state.phi = phi;
-				phi += 0.01;
-			},
-		});
+const globe = createGlobe(canvasRef.current as HTMLCanvasElement, {
+    devicePixelRatio: 2,
+    width: 400 * 2,
+    height: 400 * 2,
+    phi: 0,
+    theta: 0,
+    dark: 1,           // Keep this at 1 for the dark background
+    diffuse: 0.8,
+    mapSamples: 16000,
+    mapBrightness: 6,
+    
+    // --- UPDATE THESE COLORS ---
+    baseColor: [0.0, 0.2, 0.05],    // Dark forest green base
+    markerColor: [0.0, 1.0, 0.25],  // Bright "Matrix" green for users
+    glowColor: [0.0, 0.3, 0.1],     // Subtle green atmospheric glow
+    
+    markers: [],
+    opacity: 0.9,      // Increased opacity for a sharper look
+    onRender: (state) => {
+        state.markers = [...positions.current.values()];
+        state.phi = phi;
+        phi += 0.005;  // Slowed rotation slightly for a more "stable" feel
+    },
+});
 
 		return () => {
 			globe.destroy();
 		};
 	}, []);
 
-	return (
-		<div className="App">
-			<h1>Where's everyone at?</h1>
-			{counter !== 0 ? (
-				<p>
-					<b>{counter}</b> {counter === 1 ? "person" : "people"} connected.
-				</p>
-			) : (
-				<p>&nbsp;</p>
-			)}
-
-			{/* The canvas where we'll render the globe */}
-			<canvas
-				ref={canvasRef as LegacyRef<HTMLCanvasElement>}
-				style={{ width: 400, height: 400, maxWidth: "100%", aspectRatio: 1 }}
-			/>
-
-			{/* Let's give some credit */}
-			<p>
-				Powered by <a href="https://cobe.vercel.app/">🌏 Cobe</a>,{" "}
-				<a href="https://www.npmjs.com/package/phenomenon">Phenomenon</a> and{" "}
-				<a href="https://npmjs.com/package/partyserver/">🎈 PartyServer</a>
-			</p>
-		</div>
-	);
+return (
+    <div className="App" style={{ color: '#00ff41', fontFamily: 'monospace' }}>
+        <h1>[ SYSTEM_LOCATOR ]</h1>
+        {counter !== 0 ? (
+            <p>> ONLINE_NODES: {counter}</p>
+        ) : (
+            <p>> SCANNING...</p>
+        )}
+        {/* ... rest of the code ... */}
+    </div>
+);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
