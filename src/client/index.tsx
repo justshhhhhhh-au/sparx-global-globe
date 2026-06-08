@@ -8,84 +8,166 @@ import usePartySocket from "partysocket/react";
 // The type of messages we'll be receiving from the server
 import type { OutgoingMessage } from "../shared";
 
+// Strongly-typed marker used by the globe
+type GlobeMarker = {
+	location: [number, number]; // [lat, lng]
+	size: number;
+};
+
+function isAddMarker(msg: any): msg is { type: "add-marker"; position: { lat: number; lng: number; id: string } } {
+	return msg && msg.type === "add-marker" && msg.position && typeof msg.position.lat === "number" && typeof msg.position.lng === "number" && typeof msg.position.id === "string";
+}
+
+function isRemoveMarker(msg: any): msg is { type: "remove-marker"; id: string } {
+	return msg && msg.type === "remove-marker" && typeof msg.id === "string";
+}
+
 function App() {
 	// A reference to the canvas element where we'll render the globe
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
+	const globeRef = useRef<any | null>(null);
 	// The number of markers we're currently displaying
 	const [counter, setCounter] = useState(0);
 	// A map of marker IDs to their positions
-	// Note that we use a ref because the globe's `onRender` callback
-	// is called on every animation frame, and we don't want to re-render
-	// the component on every frame.
-	const positions = useRef<
-		Map<
-			string,
-			{
-				location: [number, number];
-				size: number;
-			}
-		>
-		>(new Map());
+	const positions = useRef<Map<string, GlobeMarker>>(new Map());
+
 	// Connect to the PartyServer server
 	const socket = usePartySocket({
 		room: "default",
 		party: "globe",
 		onMessage(evt) {
-			const message = JSON.parse(evt.data as string) as OutgoingMessage;
-			if (message.type === "add-marker") {
-				// Add the marker to our map
-				positions.current.set(message.position.id, {
-					location: [message.position.lat, message.position.lng],
-					size: message.position.id === socket?.id ? 0.1 : 0.05,
-				});
-				// Update the counter
-				setCounter((c) => c + 1);
-			} else {
-				// Remove the marker from our map
-				positions.current.delete(message.id);
-				// Update the counter
-				setCounter((c) => c - 1);
+			try {
+				const parsed = JSON.parse(evt.data as string) as unknown;
+				if (isAddMarker(parsed)) {
+					// Defensive: validate lat/lng ranges
+					const lat = Math.max(-90, Math.min(90, parsed.position.lat));
+					const lng = Math.max(-180, Math.min(180, parsed.position.lng));
+					positions.current.set(parsed.position.id, {
+						location: [lat, lng],
+						size: parsed.position.id === socket?.id ? 0.1 : 0.05,
+					});
+				} else if (isRemoveMarker(parsed)) {
+					positions.current.delete(parsed.id);
+				} else {
+					// Unknown message type - ignore
+					return;
+				}
+				// keep the counter strictly in sync with the map size
+				setCounter(positions.current.size);
+			} catch (err) {
+				console.warn("Received invalid socket message", err);
 			}
 		},
 	});
 
+	// Ensure socket is cleaned up if possible when component unmounts
 	useEffect(() => {
-		// Don't try to create the globe until the canvas element is mounted
+		return () => {
+			if (socket) {
+				if (typeof (socket as any).close === "function") {
+					try {
+						(socket as any).close();
+					} catch (e) {
+						/* ignore */
+					}
+				}
+				if (typeof (socket as any).disconnect === "function") {
+					try {
+						(socket as any).disconnect();
+					} catch (e) {
+						/* ignore */
+					}
+				}
+			}
+		};
+	}, [socket]);
+
+	// Create / recreate the globe when the canvas mounts or the window resizes/devicePixelRatio changes
+	useEffect(() => {
 		if (!canvasRef.current) return;
 
-		// The angle of rotation of the globe
-		// We'll update this on every frame to make the globe spin
-		let phi = 0;
+		let mounted = true;
+		let resizeTimer: number | undefined;
 
-		const globe = createGlobe(canvasRef.current, {
-			devicePixelRatio: 2,
-			width: 400 * 2,
-			height: 400 * 2,
-			phi: 0,
-			theta: 0,
-			dark: 1, // Keep this at 1 for the dark background
-			diffuse: 0.8,
-			mapSamples: 16000,
-			mapBrightness: 6,
+		const create = () => {
+			if (!canvasRef.current) return;
 
-			// --- UPDATE THESE COLORS ---
-			baseColor: [0.0, 0.2, 0.05], // Dark forest green base
-			markerColor: [0.0, 1.0, 0.25], // Bright "Matrix" green for users
-			glowColor: [0.0, 0.3, 0.1], // Subtle green atmospheric glow
+			const dpr = Math.max(1, window.devicePixelRatio || 1);
+			const clientWidth = Math.max(200, canvasRef.current.clientWidth || 400);
+			const clientHeight = Math.max(200, canvasRef.current.clientHeight || 400);
+			const width = Math.floor(clientWidth * dpr);
+			const height = Math.floor(clientHeight * dpr);
 
-			markers: [],
-			opacity: 0.9, // Increased opacity for a sharper look
-			onRender: (state) => {
-				state.markers = [...positions.current.values()];
-				state.phi = phi;
-				phi += 0.005; // Slowed rotation slightly for a more "stable" feel
-			},
-		});
+			// destroy existing globe first
+			if (globeRef.current && typeof globeRef.current.destroy === "function") {
+				try {
+					globeRef.current.destroy();
+				} catch (e) {
+					/* ignore */
+				}
+			}
+
+			let phi = 0;
+			globeRef.current = createGlobe(canvasRef.current, {
+				devicePixelRatio: dpr,
+				width,
+				height,
+				phi: 0,
+				theta: 0,
+				dark: 1,
+				diffuse: 0.8,
+				mapSamples: 16000,
+				mapBrightness: 6,
+
+				baseColor: [0.0, 0.2, 0.05],
+				markerColor: [0.0, 1.0, 0.25],
+				glowColor: [0.0, 0.3, 0.1],
+
+				markers: [],
+				opacity: 0.9,
+				onRender: (state: any) => {
+					state.markers = Array.from(positions.current.values()) as unknown as GlobeMarker[];
+					state.phi = phi;
+					phi += 0.005;
+				},
+			});
+		};
+
+		create();
+
+		const handleResize = () => {
+			// debounce
+			if (resizeTimer) window.clearTimeout(resizeTimer);
+			resizeTimer = window.setTimeout(() => {
+				if (!mounted) return;
+				create();
+			}, 150) as unknown as number;
+		};
+
+		window.addEventListener("resize", handleResize);
+
+		// Also observe canvas size changes (more reliable than window resize in some layouts)
+		let ro: ResizeObserver | null = null;
+		if (typeof ResizeObserver !== "undefined") {
+			ro = new ResizeObserver(handleResize);
+			if (canvasRef.current) ro.observe(canvasRef.current);
+		}
 
 		return () => {
-			globe.destroy();
+			mounted = false;
+			window.removeEventListener("resize", handleResize);
+			if (resizeTimer) window.clearTimeout(resizeTimer);
+			if (ro && canvasRef.current) ro.unobserve(canvasRef.current);
+			if (globeRef.current && typeof globeRef.current.destroy === "function") {
+				try {
+					globeRef.current.destroy();
+				} catch (e) {
+					/* ignore */
+				}
+				globeRef.current = null;
+			}
 		};
-	}, []);
+	}, [canvasRef]);
 
 	return (
 		<div className="App" style={{ color: "#00ff41", fontFamily: "monospace" }}>
@@ -95,7 +177,7 @@ function App() {
 				ref={canvasRef}
 				width={400 * 2}
 				height={400 * 2}
-				style={{ width: 400, height: 400, display: "block", marginTop: 12 }}
+				style={{ width: "100%", maxWidth: 400, height: 400, display: "block", marginTop: 12 }}
 			/>
 		</div>
 	);
